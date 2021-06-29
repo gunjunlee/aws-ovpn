@@ -9,24 +9,20 @@ import platform
 import csv
 import json
 import sys
+import boto3
+from botocore.config import Config
+import pdb
 
-SSH_CMD = "ssh -i {aws_key} ubuntu@{aws_ip}"
-SCP_CMD = "scp -i {aws_key} ubuntu@{aws_ip}"
+SecurityGroupIds = [""]  #T
+path_aws_key = ""  #T
+SSH_CMD = "ssh -o StrictHostKeyChecking=no -i {path_aws_key} ubuntu@{aws_ip}"
+SCP_CMD = "scp -o StrictHostKeyChecking=no -i {path_aws_key} ubuntu@{aws_ip}"
+SSH_WAIT_CMD = SSH_CMD + " ls"
 SET_WG_SERVER_CMD =  SSH_CMD + \
-                     "\"wget https://git.io/wireguard -O wireguard-install.sh" + \
+                     " \"wget https://git.io/wireguard -O wireguard-install.sh" + \
                      " && sudo bash wireguard-install.sh" + \
                      " && sudo cp /root/client.conf ~/\""
 GET_WG_CONF_CMD = SCP_CMD + ":~/client.conf {conf_path}"
-AWS_CMD = " aws --region {aws_region} ec2 "
-AWS_RUN_CMD = AWS_CMD + " run-instances" + \
-                           " --image-id ami-0df99b3a8349462c6" + \
-                           " --key-name {aws_key_name}" + \
-                           " --instance-type {aws_instance_type}" + \
-                           " --security-group-ids {security_group_ids}" + \
-                           " --tag-specifications 'ResourceType=instance,Tags=[{{Key=Name,Value=wg-server}}]'"
-AWS_START_CMD = AWS_CMD + " start-instances --instance-ids {instance_ids}"
-AWS_STOP_CMD = AWS_CMD + " stop-instances --instance-ids {instance_ids}"
-AWS_DESCRIBE_CMD = AWS_CMD + " describe-instances --filters Name=tag-key,Values=Name"
 AWS_REGIONS = {
     "tokyo": "ap-northeast-1",
     "seoul": "ap-northeast-2",
@@ -40,6 +36,7 @@ AWS_REGIONS = {
     "california": "us-west-1",
     "oregon": "us-west-2",
 }
+
 cur_dir = Path(__file__).parent
 path_config_template = cur_dir / "config_template.conf"
 path_credential = cur_dir / "credentials.csv"
@@ -47,7 +44,16 @@ path_cache = cur_dir / "cache.json"
 dir_conf = cur_dir / "configs"
 dir_conf.mkdir(exist_ok=True)
 
+
 def connect_windows():
+    pass
+
+
+def connect_mac():
+    pass
+
+
+def connect_linux():
     pass
 
 
@@ -65,8 +71,27 @@ def get_region(default_region):
         print("There is no region named {region}.".format(region=region))
 
 
-def set_wg_server():
-    proc = subprocess.Popen(SET_WG_SERVER_CMD.format(aws_key=aws_key, aws_ip=aws_ip),
+def check_ssh_key(path_aws_key):
+    if oct(os.stat(path_aws_key).st_mode)[-3:] != "400":
+        raise RuntimeError(
+            "Permission of the ssh identity file is not owner read only.\n" \
+            "Try: chmod 400 {path_aws_key}".format(path_aws_key=path_aws_key))
+
+def aws_wait_ssh(path_aws_key, aws_ip):
+    cmd = SSH_WAIT_CMD.format(path_aws_key=path_aws_key, aws_ip=aws_ip)
+    while True:
+        ret = subprocess.run(cmd, shell=True, capture_output=True)
+        if ret.returncode == 0:
+            break
+        print(
+            "Cannot connect Instance(id: {instance_id}, ip: {aws_ip}) yet. wait for 5 seconds.."
+            .format(instance_id=instance_id, aws_ip=aws_ip))
+        time.sleep(5)
+
+def set_wg_server(path_aws_key, aws_ip):
+    cmd = SET_WG_SERVER_CMD.format(path_aws_key=path_aws_key, aws_ip=aws_ip)
+    print(cmd)
+    proc = subprocess.Popen(cmd,
                             shell=True,
                             stdin=sys.stdin.fileno(),
                             stdout=sys.stdout.fileno(),
@@ -76,21 +101,51 @@ def set_wg_server():
         raise RuntimeError("Error occured during setup wireguard server")
 
 
-def get_wg_conf():
-    conf_path = (dir_conf / aws_region).absolute()
-    proc = subprocess.run(GET_WG_CONF_CMD.format(aws_key=aws_key, aws_ip=aws_ip, conf_path=conf_path), shell=True)
+def get_wg_conf(path_aws_key, aws_ip, conf_path):
+    proc = subprocess.run(GET_WG_CONF_CMD.format(path_aws_key=path_aws_key, aws_ip=aws_ip, conf_path=conf_path), shell=True)
     if proc.returncode != 0:
         raise RuntimeError("Error occured during downloading wireguard config from server")
 
 
-def aws_run_instance():
-    cmd = AWS_RUN_CMD.format(
-        aws_region=aws_region, aws_key_name="aws-tokyo",
-        aws_instance_type="t2.micro", security_group_ids="")#T
-    print(cmd)
-    proc = subprocess.run(cmd, shell=True, env=os.environ.copy(), capture_output=True)
-    print(proc.stdout)
+def aws_run_instance(ec2):
+    ret = ec2.run_instances(
+        MaxCount=1,
+        MinCount=1,
+        ImageId="ami-0df99b3a8349462c6",  # ubuntu 20.04 base
+        KeyName="aws-tokyo",
+        InstanceType="t2.micro",
+        SecurityGroupIds=SecurityGroupIds,
+        TagSpecifications=[
+            {
+                "ResourceType": "instance",
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "wg-server",
+                    }
+                ]
+            }
+        ],
+    )
 
+    return ret["Instances"][0]["InstanceId"]
+
+
+def aws_wait_running(ec2, instance_id):
+    while True:
+        ret = ec2.describe_instances(InstanceIds=[instance_id])
+        state = ret["Reservations"][0]["Instances"][0]["State"]["Name"].lower()
+        if state == "running":
+            break
+        print(
+            "Instance{instance_id} is not running (now: {state}). wait for 5 seconds.."
+            .format(instance_id=instance_id, state=state))
+        time.sleep(5)  # wait for 5 secs
+
+def aws_get_ip(ec2, instance_id):
+    ret = ec2.describe_instances(InstanceIds=[instance_id])
+    ip = ret["Reservations"][0]["Instances"][0]["PublicIpAddress"]
+    return ip
 
 def aws_start_instance():
     pass
@@ -101,12 +156,7 @@ def aws_terminate_instance():
 
 
 def aws_check_instance():
-    cmd = AWS_DESCRIBE_CMD.format(aws_region=aws_region)
-    print(cmd)
-    proc = subprocess.run(cmd, shell=True, env=os.environ.copy(), capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError("aws descrive failed")
-    stats = json.loads(proc.stdout)
+    pass
     stats["Reservations"][0]["Instances"][0]["Tags"]
     import pdb; pdb.set_trace()
 
@@ -118,91 +168,57 @@ def aws_check_security_group():
 def aws_make_security_group():
     pass
 
+def get_cred_key():
+    try:
+        with path_credential.open("r") as csv_file:
+            csv_reader = csv.DictReader(csv_file)
 
-try:
-    with path_credential.open("r") as csv_file:
-        csv_reader = csv.DictReader(csv_file)
-        user_cred = None
-        for row in csv_reader:
-            if row["User name"] == "AWS-WIREGUARD":
-                user_cred = row
-                break
-        else:
+            if "User name" in csv_reader.fieldnames:
+                for row in csv_reader:
+                    if row["User name"] == "AWS-WIREGUARD":
+                        access_key = user_cred["Access key ID"]
+                        secret_key = user_cred["Secret access key"]
+                        return access_key, secret_key
             print("There is no user \"AWS-WIREGUARD\" in credentials.csv")
             print("Use first user instead")
-            user_cred = csv_reader[0]
-        os.environ["AWS_ACCESS_KEY_ID"] = user_cred["Access key ID"]
-        os.environ["AWS_SECRET_ACCESS_KEY"] = user_cred["Secret access key"]
-except FileNotFoundError:
-    print("Error: {path_credential} not exists".format(
-        path_credential=path_credential.absolute()))
-    exit(1)
+            user_cred = next(csv_reader)
+            access_key = user_cred["Access key ID"]
+            secret_key = user_cred["Secret access key"]
+            return access_key, secret_key
+    except FileNotFoundError:
+        print("Error: {path_credential} not exists".format(
+            path_credential=path_credential.absolute()))
+        exit(1)
 
-cache = {}
-try:
-    with path_cache.open("r") as cache_file:
-        cache = json.load(cache_file)
-        print(cache)
-except FileNotFoundError:
-    pass
+if __name__ == "__main__":
 
-aws_region = get_region(cache.get("aws_region", "seoul"))
-# aws_run_instance()
-aws_check_instance()
+    access_key, secret_key = get_cred_key()
 
-# aws_ip = ""#T
-# aws_key = ""#T
+    cache = {}
+    try:
+        with path_cache.open("r") as cache_file:
+            cache = json.load(cache_file)
+            print(cache)
+    except FileNotFoundError:
+        pass
 
-# try:
-#     set_wg_server()
-#     get_wg_conf()
-# except:
-#     pass
+    aws_region = get_region(cache.get("aws_region", "tokyo"))
+    conf_path = (dir_conf / aws_region).absolute() + ".conf"
 
-# def check_aws(ret):
-#     if ret.returncode != 0:
-#         raise RuntimeError(f"aws command failed")
+    config = Config(
+        region_name = aws_region,
+    )
 
+    ec2 = boto3.client("ec2",
+                       config=config,
+                       aws_access_key_id=access_key,
+                       aws_secret_access_key=secret_key)
 
-# def run_aws_command(command):
-#     print(f"executing {command}..")
-#     ret = subprocess.run(command, shell=True, capture_output=True)
-#     if ret.returncode != 0:
-#         print("----------stdout---------")
-#         print(ret.stdout)
-#         print("----------stderr---------")
-#         print(ret.stderr)
-#         print("-------------------------")
-#     return ret
+    instance_id = aws_run_instance(ec2)
+    aws_wait_running(ec2, instance_id)
+    ip = aws_get_ip(ec2, instance_id)
 
-
-# try:
-#     check_aws(run_aws_command(AWS_START_CMD))
-
-#     while True:
-#         ret = run_aws_command(AWS_DESCRIBE_CMD)
-#         if ret.returncode != 0:
-#             time.sleep(5)
-#             continue
-#         query = json.loads(ret.stdout)
-#         state = query["Reservations"][0]["Instances"][0]["State"]
-#         if state["Name"] != "running":
-#             time.sleep(5)
-#             continue
-#         break
-
-#     ip = query["Reservations"][0]["Instances"][0]["PublicIpAddress"]
-
-#     with open(ovpn, "r") as f:
-#         with tempfile.NamedTemporaryFile("w+t") as temp:
-#             for line in f:
-#                 if line.startswith("remote"):
-#                     port = line.split()[-1]
-#                     line = f"remote {ip} {port}\n"
-#                 temp.write(line)
-#             temp.flush()
-#             subprocess.run(f"cat {temp.name}", shell=True)
-#             subprocess.run(f"sudo openvpn --config {temp.name}", shell=True)
-
-# except:
-#     check_aws(run_aws_command(AWS_STOP_CMD))
+    check_ssh_key(path_aws_key)
+    aws_wait_ssh(path_aws_key=path_aws_key, aws_ip=ip)
+    set_wg_server(path_aws_key=path_aws_key, aws_ip=ip)
+    get_wg_conf(path_aws_key=path_aws_key, aws_ip=ip, conf_path=conf_path)

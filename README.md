@@ -10,6 +10,7 @@ This `How to Use` page is written mainly for Windows users. I expect Linux Users
 ### 1. Common
 
 1. Install `WireGuard`. Go to [WireGuard installation page](https://www.wireguard.com/install/) and download the Windows installer.
+    - if you're a Mac user. try `brew install wireguard-tools` on terminal
 2. Configure AWS. Go to [AWS IAM Users management page](https://console.aws.amazon.com/iam/home#/users) and click `add user` button
     1. 1st page
         1. name: `AWS-WIREGUARD`
