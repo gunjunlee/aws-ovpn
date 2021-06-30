@@ -1,2 +1,5 @@
 .vscode
 credentials.csv
+*.pem
+*.json
+*.conf
