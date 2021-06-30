@@ -5,12 +5,14 @@
             "Sid": "VisualEditor0",
             "Effect": "Allow",
             "Action": [
+                "ec2:DescribeInstances",
                 "ec2:TerminateInstances",
                 "ec2:StartInstances",
                 "ec2:CreateSecurityGroup",
+                "ec2:CreateTags",
                 "ec2:RunInstances",
                 "ec2:StopInstances",
-                "ec2:DescribeInstanceStatus"
+                "ec2:DescribeSecurityGroups"
             ],
             "Resource": "*"
         }
