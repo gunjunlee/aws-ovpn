@@ -5,6 +5,7 @@
             "Sid": "VisualEditor0",
             "Effect": "Allow",
             "Action": [
+                "ec2:AuthorizeSecurityGroupIngress",
                 "ec2:DescribeInstances",
                 "ec2:TerminateInstances",
                 "ec2:StartInstances",

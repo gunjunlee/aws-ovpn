@@ -45,18 +45,6 @@ dir_conf = cur_dir / "configs"
 dir_conf.mkdir(exist_ok=True)
 
 
-def connect_windows():
-    pass
-
-
-def connect_mac():
-    pass
-
-
-def connect_linux():
-    pass
-
-
 def get_region(region):
     if region is not None:
         if region in AWS_REGIONS.keys():
@@ -101,7 +89,6 @@ def aws_wait_ssh(path_aws_key, aws_ip):
 
 def set_wg_server(path_aws_key, aws_ip):
     cmd = SET_WG_SERVER_CMD.format(path_aws_key=path_aws_key, aws_ip=aws_ip)
-    print(cmd)
     proc = subprocess.Popen(cmd,
                             shell=True,
                             stdin=sys.stdin.fileno(),
@@ -123,6 +110,7 @@ def get_wg_conf(path_aws_key, aws_ip, conf_path):
 
 
 def aws_run_instance(ec2, sg_id):
+    print("Creating instance...")
     ret = ec2.run_instances(
         MaxCount=1,
         MinCount=1,
@@ -184,13 +172,60 @@ def aws_stop_instance(ec2, instance_id):
     ret = ec2.stop_instances(InstanceIds=[instance_id])
 
 
-def aws_get_security_group_id():
+def aws_get_security_group_id(ec2):
     try:
         ret = ec2.describe_security_groups(GroupNames=["AWS-WIREGUARD-VPN"])
     except botocore.exceptions.ClientError as e:
         if e.response["Error"]["Code"] == "InvalidGroup.NotFound":
             return None
     return ret["SecurityGroups"][0]["GroupId"]
+
+
+def aws_create_security_group(ec2):
+    try:
+        ret = ec2.create_security_group(Description="for AWS WIREGUARD VPN",
+                                        GroupName="AWS-WIREGUARD-VPN")
+        sg_id = ret["GroupId"]
+    except botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "InvalidGroup.Duplicate":
+            print("Use preexisting security group")
+            ret = ec2.describe_security_groups(
+                GroupNames=["AWS-WIREGUARD-VPN"])
+            sg_id = ret["SecurityGroups"][0]["GroupId"]
+
+    ret = ec2.authorize_security_group_ingress(GroupId=sg_id,
+                                               IpPermissions=[{
+                                                   'FromPort':
+                                                   51820,
+                                                   'IpProtocol':
+                                                   'udp',
+                                                   'IpRanges': [{
+                                                       'CidrIp':
+                                                       '0.0.0.0/0'
+                                                   }],
+                                                   'Ipv6Ranges': [],
+                                                   'PrefixListIds': [],
+                                                   'ToPort':
+                                                   51820,
+                                                   'UserIdGroupPairs': []
+                                               }, {
+                                                   'FromPort':
+                                                   22,
+                                                   'IpProtocol':
+                                                   'tcp',
+                                                   'IpRanges': [{
+                                                       'CidrIp':
+                                                       '0.0.0.0/0',
+                                                       'Description':
+                                                       ''
+                                                   }],
+                                                   'Ipv6Ranges': [],
+                                                   'PrefixListIds': [],
+                                                   'ToPort':
+                                                   22,
+                                                   'UserIdGroupPairs': []
+                                               }])
+    return sg_id
 
 
 def get_cred_key():
@@ -276,13 +311,13 @@ if __name__ == "__main__":
                        aws_access_key_id=access_key,
                        aws_secret_access_key=secret_key)
 
-    sg_id = aws_get_security_group_id()
+    sg_id = aws_get_security_group_id(ec2)
     if sg_id is None:
         print(
             "Cannot find security group for AWS WIREGUARD VPN (region: {region})"
             .format(region=aws_region))
-        print("Set security group according to the guide in README")
-        exit(1)
+        print("Creating security group...")
+        sg_id = aws_create_security_group(ec2)
 
     is_ready = False
     if aws_region in cache.keys():
