@@ -1,6 +1,7 @@
 # AWS-WIREGUARD
 
-Make and Connect temporal [WireGuard](https://www.wireguard.com/) VPN server on AWS
+Make and Connect temporal [WireGuard](https://www.wireguard.com/) VPN server on AWS.
+
 VPN server will be terminated automatically when you disconnect the VPN.
 
 ## How to Use
@@ -36,11 +37,9 @@ This `How to Use` page is written mainly for Windows users. I expect Linux Users
     5. 5th page
         1. click `Download .csv` button.
         2. `***.csv` file will be downloaded. this file contains the secret key to access AWS resource. **Do not share/upload secret key.**
-        3. copy the file into current folder and rename it
+        3. copy the file into current folder and rename it `credentials.csv`
     6. Done!
 3. Install Python and Pip. (Use Google!)
 4. open PowerShell(Windows) or Terminal(Linux)
     1. `pip install -r requirements.txt`
-5.
-
-## How to Use (Windows)
+5. `python3 vpn.py`
