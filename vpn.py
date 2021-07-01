@@ -262,6 +262,7 @@ def wg_down(conf_path):
 
 
 def signal_handler(sig, frame):
+    print()
     wg_down(conf_path=conf_path)
     aws_stop_instance(ec2, instance_id)
 
@@ -272,6 +273,7 @@ def signal_handler(sig, frame):
     }
     with path_cache.open("w") as cache_file:
         json.dump(cache, cache_file)
+    exit(0)
 
 
 def update_config(conf_path, ip):
@@ -289,6 +291,31 @@ def parse_args():
     parser.add_argument("--region", type=str, help="region")
     args = parser.parse_args()
     return args
+
+
+def show_data_transfer():
+    def to_readable(data):
+        if data < 1e3:
+            return "{data} B".format(data=data)
+        elif data < 1e6:
+            return "{data:.1f} KiB".format(data=data / 1e3)
+        elif data < 1e9:
+            return "{data:.1f} MiB".format(data=data / 1e6)
+        else:
+            return "{data:.1f} GiB".format(data=data / 1e9)
+
+    ret = subprocess.run("sudo wg show all transfer",
+                         shell=True,
+                         capture_output=True)
+    transfer = ret.stdout.decode().split("\t")
+    if len(transfer) != 4:
+        print("[WARNING] wg output format is unexpected")
+    transfer_in = int(transfer[2])
+    transfer_out = int(transfer[3])
+    print("In: {t_in} / Out: {t_out}          ".format(
+        t_in=to_readable(transfer_in), t_out=to_readable(transfer_out)),
+          end="\r")
+    return ret
 
 
 if __name__ == "__main__":
@@ -336,7 +363,7 @@ if __name__ == "__main__":
             is_ready = True
     if not is_ready:
         conf_path = str((dir_conf / aws_region).absolute()) + ".conf"
-        instance_id = aws_run_instance(ec2, sg_id)
+        instance_id = aws_run_instance(ec2, [sg_id])
         aws_wait_running(ec2, instance_id)
         ip = aws_get_ip(ec2, instance_id)
         if args.aws_key is not None:
@@ -354,4 +381,6 @@ if __name__ == "__main__":
     wg_up(conf_path=conf_path)
 
     signal.signal(signal.SIGINT, signal_handler)
-    signal.pause()
+    while True:
+        show_data_transfer()
+        time.sleep(10)
